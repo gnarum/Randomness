@@ -1,0 +1,17 @@
+## I primarily SSH into my Kali box from my Windows box and I use Windows Terminal to accomplish this.  I use the following aliases in Windows Terminal
+## to streamline some operations.  The Kali side alias 'rsh' is mean to be paired with the 'ctrl+shift+p' alias listed here to build a resilient remote shell
+
+{
+          "command": {
+              "action": "sendInput",
+              "input": "echo 'Username: ' $(whoami);ip add || ifconfig;echo 'Hostname:  ' $(hostname);echo 'Proof:  ' $(cat /root/proof.txt)\n"
+          },
+            "keys": "ctrl+shift+o"
+        },
+        {
+          "command": {
+              "action": "sendInput",
+              "input": "stty raw -echo; fg\npython -c 'import pty;pty.spawn(\"/bin/bash\")' || python3 -c 'import pty;pty.spawn(\"/bin/bash\")'\nstty rows 45 cols 200\nexport TERM=xterm-256color\nexport SHELL=/bin/bash\nexport PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:~/bin:~/.bin\n"
+          },
+            "keys": "ctrl+shift+p"
+        },
