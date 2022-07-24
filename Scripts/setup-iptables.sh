@@ -19,7 +19,6 @@ iptables -P OUTPUT DROP
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -i tun0 -d 192.168.119.211 -j ACCEPT
-iptables -A INPUT -i tun0 -d 192.168.49.111 -j ACCEPT
 iptables -A INPUT -i eth0 -j ACCEPT
 
 iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
