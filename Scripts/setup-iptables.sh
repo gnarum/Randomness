@@ -1,4 +1,6 @@
 #!/bin/bash
+# Add the route to your test subnet to your Windows host route table with:
+# Powershell:  route add <TestSubnet> mask <TestNetmask> <Kali LAN IP> 
 
 echo "1" > /proc/sys/net/ipv4/ip_forward
 modprobe ip_tables
