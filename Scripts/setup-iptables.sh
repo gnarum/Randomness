@@ -1,6 +1,5 @@
 #!/bin/bash
-# Add the route to your test subnet to your Windows host route table with:
-# Powershell:  route add <TestSubnet> mask <TestNetmask> <Kali LAN IP> 
+IPADD=`ip add show dev tun0 | grep 'inet ' | sed 's|^[ \t]+||' | cut -d ' ' -f 6 | cut -d '/' -f 1`
 
 echo "1" > /proc/sys/net/ipv4/ip_forward
 modprobe ip_tables
@@ -12,20 +11,6 @@ iptables -X
 iptables -t nat -F
 iptables -t nat -X
 
-iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+iptables-restore /opt/.Scripts/fwd-firewall.ipt
 
-iptables -P INPUT DROP
-iptables -P FORWARD DROP
-iptables -P OUTPUT DROP
-
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -i tun0 -d 192.168.119.211 -j ACCEPT
-iptables -A INPUT -i eth0 -j ACCEPT
-
-iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
-
-iptables -A OUTPUT -j ACCEPT
-iptables -A OUTPUT -j ACCEPT
-
+iptables -A INPUT -i tun0 -d $IPADD -j ACCEPT
