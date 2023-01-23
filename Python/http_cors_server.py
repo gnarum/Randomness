@@ -23,7 +23,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', self.get_origin())
-        self.send_header('Access-Control-Allow-Methods', 'GET POST')
+        self.send_header('Access-Control-Allow-Methods', 'GET')
         self.send_header('Access-Control-Allow-Headers', '*')
 #        self.send_header('Access-Control-Allow-Credentials', 'true')
 #        self.send_header('Access-Control-Expose-Headers', '*')
