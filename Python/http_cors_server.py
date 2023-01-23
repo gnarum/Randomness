@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # encoding: utf-8
 # Originally posted here:  https://gist.github.com/acdha/925e9ffc3d74ad59c3ea
+# and here:  https://parsiya.net/blog/2020-11-15-customizing-pythons-simplehttpserver/
 # Modified to reflect the value sent in the Origin header to bypass CORS restrictions
 """Use instead of `python3 -m http.server` when you need CORS"""
 import sys,logging
