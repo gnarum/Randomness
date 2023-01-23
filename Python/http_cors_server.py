@@ -11,8 +11,6 @@ from urllib.parse import urlparse
 PORT = int(sys.argv[1])
 
 class CORSRequestHandler(SimpleHTTPRequestHandler):
-    origin = ''
-
     def get_origin(self):
         parsed = urlparse(self.path)
         query_string = parsed.query
@@ -23,14 +21,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
 #        logging.error(self.headers)
         SimpleHTTPRequestHandler.do_GET(self)
 
-    def do_POST(self):
-#        logging.error(self.headers)
-        SimpleHTTPRequestHandler.do_POST(self)
-        
     def end_headers(self):
-        if self.origin == '':
-            self.get_origin()
-        self.send_header('Access-Control-Allow-Origin', self.origin)
+        self.send_header('Access-Control-Allow-Origin', self.get_origin())
         self.send_header('Access-Control-Allow-Methods', 'GET POST')
         self.send_header('Access-Control-Allow-Headers', '*')
 #        self.send_header('Access-Control-Allow-Credentials', 'true')
