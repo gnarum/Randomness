@@ -1,0 +1,292 @@
+#!/bin/bash
+
+# Written by Joshua Johnson - 14 August 2023
+# Revised to take command switches and arguments - 16 August 2023
+# Revised to cleanup the code - 17 August 2023
+# Revised to allow specification of IP's instead of just Node numbers - 19 August 2023
+# Revised to add the capability to push files to each host - 22 August 2023
+# Revised to add the capability to push new users to each host - 24 August 2023
+# Revised to move the script to /opt/Scripts while seperating the data to /home/USERNAME/.Script_Data, also set the default user of the script to 'admin' if run as 'root'
+# Version 1.6
+
+if [[ "$UID" == "0" ]]; then
+        USERNAME=admin
+else
+        USERNAME=$USER
+fi
+USER_DIR="/home/$USERNAME/"
+
+API_ACC_FILE=".api-access"
+API_SEC_FILE=".api-secret"
+EXEMPT_NODES="172.21.10.187"
+PASSWORD_FILE=".password"
+HASH_FILE=".hash"
+NODES="ALL"
+SCRIPT_DIR=/opt/Scripts
+SCRIPT_DATA_DIR=$USER_DIR/.Script_Data
+SSH_DIR="$USER_DIR/.ssh"
+SSH_KEY="$SSH_DIR/id_ecdsa"
+SSH_OPTS="-q -o BatchMode=yes -o StrictHostKeyChecking=yes -i $SSH_KEY"
+# SSH_OPTS="-i $SSH_KEY"
+SSH_USER="$USERNAME"
+TSC_HOST=172.21.10.187
+
+Create_Data_Dir()
+{
+        mkdir -m 0700 -p $SCRIPT_DATA_DIR
+        touch $SCRIPT_DATA_DIR/.password
+        touch $SCRIPT_DATA_DIR/.hash
+        chmod 0400 $SCRIPT_DATA_DIR/.password
+        chmod 0400 $SCRIPT_DATA_DIR/.hash
+        chown $USERNAME:$USERNAME $SCRIPT_DATA_DIR/.password
+        chown $USERNAME:$USERNAME $SCRIPT_DATA_DIR/.hash
+        ln -s /opt/Scripts/.readme $SCRIPT_DATA_DIR/README
+}
+
+Perm_Check()
+{
+        if [ ! -f $SSH_KEY ]; then
+                echo 'Please fix the SSH Key, it appears to be missing.'
+                exit 10
+        elif [ ! -d $SCRIPT_DATA_DIR ]; then
+                Create_Data_Dir
+                echo "Please follow the README in $SCRIPT_DATA_DIR to setup the required information for the script to execute properly."
+                exit 12
+        elif [ ! -f $SCRIPT_DATA_DIR/.password ]; then
+                echo ' Please fix the .password file, it appears to be missing.'
+                exit 15
+        fi
+
+        API_ACC_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $API_ACC_FILE)
+        API_SEC_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $API_SEC_FILE)
+        HASH_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $HASH_FILE)
+        PASSWORD_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $PASSWORD_FILE)
+        SSH_DIR_PERM=$(ls -alh $USER_DIR | grep ' .ssh')
+        SSH_KEY_PERM=$(ls -alh $SSH_KEY)
+        EXEC_PERM=$(ls -alh $SCRIPT_DIR | grep $0)
+
+        if   ! echo $SSH_DIR_PERM | awk '{print $1}' | grep -q 'drwx------'; then
+                echo 'Please fix the permissions on the $SSH_DIR folder; the permissions should be "0700"'
+                exit 20
+        elif ! echo $SSH_DIR_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo "Please fix the ownership on the $SSH_DIR folder; $USERNAME should own the file"
+                exit 21
+        elif ! echo $SSH_KEY_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo 'Please fix the permissions on the $SSH_DIR/id_ecdsa file; the permissions should be "0600"'
+                exit 30
+        elif ! echo $SSH_KEY_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo 'Please fix the ownership on the $SSH_DIR/id_ecdsa file; $USERNAME should own the file'
+                exit 31
+        elif ! echo $PASSWORD_PERM | awk '{print $1}' | grep -q '\-r--------'; then
+                echo 'Please fix the permissions on the ssh password file; the permissions should be "0400"'
+                exit 40
+        elif ! echo $PASSWORD_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo "Please fix ownership of the .password file; the file should be owned by '$USERNAME'"
+                exit 41
+        elif ! echo $HASH_PERM | awk '{print $1}' | grep -q '\-r--------'; then
+                echo 'Please fix the permissions on the hash file; the permissions should be "0400"'
+                exit 42
+        elif ! echo $HASH_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo "Please fix ownership of the .hash file; the file should be owned by '$USERNAME'"
+                exit 43
+        elif ! echo $API_ACC_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo 'Please fix the permission on the API access file; the permissions should be "0600"'
+                exit 50
+        elif ! echo $API_ACC_PERM | awk '{print $3}' | grep -q 'root'; then
+                echo 'Please fix ownership of the API access file; the file should be owned by "root"'
+                exit 51
+        elif ! echo $API_SEC_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo 'Please fix the permission on the API secret file; the permissions should be "0600"'
+                exit 50
+        elif ! echo $API_SEC_PERM | awk '{print $3}' | grep -q 'root'; then
+                echo 'Please fix ownership of the API secret file; the file should be owned by "root"'
+                exit 51
+        fi
+}
+
+Work()
+{
+        if [[ ! -v NIP ]]; then
+                echo "Error:  NIP is not initialized, cannot continue."
+                exit 100
+        fi
+        if [[ ! $EXEMPT_NODES =~ $NIP ]]; then
+                # Check if we need to create a user on the host FIRST
+                if [[ -v NEW_USER && -v HASH ]]; then
+                        if [[ "$NEW_USER" == "" ]]; then
+                                echo "Error: specified user option without specifying an actual user."
+                                exit 110
+                        elif [[ ! -v HASH ]]; then
+                                echo "Error: You need to specify a password to go with the user."
+                                exit 115
+                        elif [[ ! -v SUDOPASS ]]; then
+                                echo "Error: SUDO permissions are required to add a user to remote host."
+                                exit 120
+                        else # Passed all our error checks, proceed with work
+                                [[ ! -v QUIET ]] && echo "Creating user ($NEW_USER) on host ($NIP)"
+                                ssh $SSH_OPTS $SSH_USER@$NIP "echo '$SUDOPASS' | sudo -S /sbin/adduser -m --shell /bin/bash --home-dir /home/$NEW_USER -p '$HASH' -G wheel $NEW_USER && sudo /bin/mkdir -p /home/$NEW_USER/.ssh && sudo /bin/touch /home/$NEW_USER/.ssh/authorized_keys && sudo /bin/touch /home/$NEW_USER/.ssh/config && sudo /bin/chown -R $NEW_USER:$NEWUSER /home/$NEW_USER/ && sudo /bin/chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh/ && sudo /bin/chmod -R 600 /home/$NEW_USER/.ssh && sudo /bin/chmod 700 /home/$NEW_USER/.ssh && sudo /bin/chmod 700 /home/$NEW_USER/"
+                        fi
+                fi
+
+                if [[ -v KEY && -v NEW_USER ]]; then
+                        if [[ "$NEW_USER" == "" ]]; then
+                                echo "Error: specified user does not appear to be valid."
+                                exit 135
+                        elif [[ "$KEY" == "" ]]; then
+                                echo "Error: specified key does not appear to be valid, please double check the key."
+                                exit 140
+                        elif [[ ! -v SUDOPASS ]]; then
+                                echo "Error: SUDO permissions are required to add a key to the user on the remote host."
+                                exit 145
+                        else # Passed all our error checks, proceed with work
+                                [[ ! -v QUIET ]] && echo "Pushing ssh key for user ($NEW_USER)"
+                                ssh $SSH_OPTS $SSH_USER@$NIP "echo $KEY > /tmp/.trash && echo '$SUDOPASS' | sudo -S mv /tmp/.trash /home/$NEW_USER/.ssh/authorized_keys && sudo /bin/chown $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh/authorized_keys && sudo /bin/chmod 600 /home/$NEW_USER/.ssh/authorized_keys; rm -f /tmp/.trash &>/dev/null"
+                        fi
+                fi
+                # Check if we're supposed to push a file, do the work if so
+                if [[ -v FILE_TO_UPLOAD ]]; then
+                        if [[ "$FILE_TO_UPLOAD" == "" ]]; then
+                                echo "Error: specified file option without specifying an actual file."
+                                exit 150
+                        elif [[ ! -f $FILE_TO_UPLOAD ]]; then
+                                echo "Error: file not found."
+                                exit 160
+                        else # Passed all our error checks, proceed with work
+                                [[ ! -v QUIET ]] && echo "Uploading file ($FILE_TO_UPLOAD) to host ($NIP)"
+                                scp $FILE_TO_UPLOAD $SSH_USER@$NIP: &>/dev/null
+                        fi
+                fi
+                # Check if we're executing a command on the remote host, this should be the LAST thing we do before we leave the host
+                if [[ -v CMD ]]; then
+                        # Check if we're doing SUDO or not
+                        [[ ! -v QUIET ]] && echo "Executing command on host ($NIP)"
+                        if [[ -v USE_SUDO ]]; then
+                                ssh $SSH_OPTS $SSH_USER@$NIP "echo '$SUDOPASS' | sudo -S $CMD"
+                        else
+                                ssh $SSH_OPTS $SSH_USER@$NIP "$CMD"
+                        fi
+                fi
+        fi
+}
+
+Main()
+{
+        Perm_Check
+
+        MY_IP=$(ip add | grep ' inet ' | grep -v '127.0.0.' | awk '{print $2}' | cut -d '/' -f 1)
+
+        SUDOPASS=$(sudo cat $SCRIPT_DATA_DIR/$PASSWORD_FILE)
+        API_ACC_KEY=$(sudo cat $SCRIPT_DATA_DIR/$API_ACC_FILE)
+        API_SEC_KEY=$(sudo cat $SCRIPT_DATA_DIR/$API_SEC_FILE)
+
+        [[ ! -v QUIET ]] && echo -e "Executing the following command on each node.\n$CMD\n\nWill skip these nodes:\n$EXEMPT_NODES\n\nExecuting:\n"
+        if [[ ! -v PIP ]]; then # If PIP isn't specified, assume we're using Node ID's
+                [[ ! -v QUIET ]] && echo 'Retreiving list of nodes.'
+                if [[ "$NODES" == "ALL" ]]; then
+                        NODES=$(curl -s -k -H "x-apikey: accesskey=$API_ACC_KEY;secretkey=$API_SEC_KEY" -X GET "https://$TSC_HOST/rest/scanner" 2>/dev/null | jq | grep -E '^[ ]{6}"id"\: "[0-9]{1,4}"\,$' | cut -d '"' -f 4 | sort -d)
+                fi
+                for n in $NODES; do
+                        NIP=$(curl -k -H "x-apikey: accesskey=$API_ACC_KEY;secretkey=$API_SEC_KEY" -X GET "https://$TSC_HOST/rest/scanner/$n" 2>/dev/null | jq | grep -i '"ip":' | cut -d '"' -f 4)
+                        [[ ! -v QUIET ]] && echo -e "\n\n"
+                        echo "Working on Node:  $n // IP Address:  $NIP"
+                        Work
+                done
+        else # PIP Exists, use this instead of Node Numbers to derive IP's
+                [[ ! -v QUIET ]] && echo 'Using specified IP addresses, will not use nodes from TSC'
+                for n in $PIP; do
+                        NIP=$n
+                        [[ ! -v QUIET ]] && echo -e "\n\n"
+                        echo "Working on Node at IP Address:  $NIP"
+                        Work
+                done
+        fi
+        if [[ ! $EXEMPT_NODES =~ $MY_IP ]]; then
+                 sudo $CMD
+        fi
+}
+
+Help()
+{
+        echo -e "A script to push arbitrary commands or files to the fleet of connected Nessus Scanners\n\n"
+        echo "Syntax: $0 [-c|-d|-e|-f|-h|-i|-k|-K|-n|-p|-P|-s|-u]"
+        echo "Options:"
+        echo "  -c      the command to be executed"
+        echo "  -d      do not exempt any hosts - Beware!"
+        echo "  -e      exempted hosts"
+        echo "  -f      filename to upload to remote host in /home/(USERNAME)/ location"
+        echo "  -h      display this help message"
+        echo "  -i      list of IP's to push commands to"
+        echo "  -k      SSH key string to use for the new user, must be used with -u"
+        echo "  -K      SSH key file to use for the new user, must be used with -u"
+        echo "  -n      list of node ID's to push commands to"
+        echo "  -p      password hash for the new user, must be used with -u"
+        echo "  -P      file that contains the password hash for the new user, must be used with -u"
+        echo "  -q      quiet, suppress status messages"
+        echo "  -s      use sudo on remote host"
+        echo "  -u      username to create on remote host"
+        echo -e "\n\nOrder of operations:\n\tUser Creation\n\tUser Password Reset\n\tUser SSHKEY Addition\n\tFile Upload\n\tCommand Execution\n\nWith this order you can create a user, provision it, upload files to it, and then execute commands at it with one pass through the command."
+}
+
+
+while getopts ":c:de:f:hi:k:K:n:p:P:qsu:" option; do
+        [[ ! -v QUIET ]] && echo "$option:  $OPTARG"
+        case $option in
+                c) # Enter command to execute across the fleet
+                        CMD=$OPTARG;;
+                d) # Do not exempt any hosts
+                        EXEMPT_NODES="";;
+                e) # Enter host exemptions for the command
+                        EXEMPT_NODES=$OPTARG;;
+                f) # Filename to upload to remote host
+                        if [[ -f $OPTARG ]]; then
+                                FILE_TO_UPLOAD=$OPTARG
+                        else
+                                Help
+                                echo "Error: Specified file to upload does not exist."
+                                exit
+                        fi;;
+                h) # display Help message
+                        Help
+                        exit;;
+                i) # IP's to run commands against
+                        PIP=$OPTARG;;
+                k) # SSH Key string to use for new user
+                        KEY=$OPTARG;;
+                K) # SSH Key File to use for new user
+                        if [[ -f $OPTARG ]]; then
+                                KEY=$(cat $OPTARG)
+                        else
+                                Help
+                                echo "Error: Specified key file does not exist."
+                                exit
+                        fi;;
+                n) # Tenable Node numbers to execute against
+                        NODES=$OPTARG;;
+                p) # Password hash for user to be created, used with -u to provide a user
+                        HASH="$OPTARG";;
+                P) # File that contains the password hash to be used with -u for creating a new user
+                        if [[ -f $OPTARG ]]; then
+                                HASH=$(cat $OPTARG)
+                        else
+                                Help
+                                echo "Error: Specified password file does not exist."
+                                exit
+                        fi;;
+                q) # Quiet mode, no debug outputs
+                        QUIET="yes";;
+                s) # Use SUDO mode on the remote host
+                        USE_SUDO="yes";;
+                u) # Username to create on remote host, optionally used with -p to provide a password
+                        NEW_USER=$OPTARG;;
+                \?) # Handle invalids
+                        Help
+                        echo "Error: Invalid option specified"
+                        exit;;
+        esac
+done
+
+if [[ -v CMD || -v NEW_USER || -v FILE_TO_UPLOAD ]]; then
+        Main
+else
+        Help
+fi

@@ -1,0 +1,236 @@
+#!/bin/bash
+
+# Written by Joshua Johnson - 27 July 2023
+# Updated 29 August 2023 - Account for complex passwords in SUDOPASS and revised code into functions
+# Updated 6 September 2023 - Repaired typo's, added color, fixed some output formatting
+# Version 1.4
+
+DEBUG="Y"
+
+if [[ "$UID" == 0 ]]; then
+        USERNAME="admin"
+else
+        USERNAME=$USER
+fi
+SCRIPT_DATA_DIR=/home/$USERNAME/.Script_Data
+
+API_ACC_FILE=".api-access"
+API_SEC_FILE=".api-secret"
+PASSWORD_FILE=".password"
+SCRIPT_DIR="/opt/Scripts"
+SCRIPT_FILE="update-nessus.sh"
+SCRIPT_MD5=$(md5sum $SCRIPT_DIR/$SCRIPT_FILE | cut -d ' ' -f 1)
+SSH_KEY="/home/$USERNAME/.ssh/id_ecdsa"
+SSH_OPTS="-q -o BatchMode=yes -o StrictHostKeyChecking=yes -i $SSH_KEY"
+SSH_USER="$USERNAME"
+SCP_OPTS="-i $SSH_KEY"
+TMP_FILE="/tmp/trash.txt"
+DOWNLOAD_HOST="downloads.nessus.org"
+TSC_HOST="172.21.10.187"
+WEB_DIR="/opt/sc/www/html"
+
+TENABLE_USER=$(cat $SCRIPT_DATA_DIR/.tenable_user)
+TENABLE_PASS=$(cat $SCRIPT_DATA_DIR/.tenable_pass)
+PATCH_FILE="all-2.0.tar.gz"
+PATCH_URL="https://$DOWNLOAD_HOST/get.php?f=$PATCH_FILE&u=$TENABLE_USER&p=$TENABLE_PASS"
+TSC_PATCH_URL="https://$TSC_HOST/$PATCH_FILE"
+
+# Colors
+[[ -t 1 ]] || export TERM=dumb
+txtblk=$(tput setaf 0) # Black - Regular
+txtred=$(tput setaf 1) # Red
+txtgrn=$(tput setaf 2) # Green
+txtylw=$(tput setaf 3) # Yellow
+txtblu=$(tput setaf 4) # Blue
+txtpur=$(tput setaf 5) # Purple
+txtcyn=$(tput setaf 6) # Cyan
+txtwht=$(tput setaf 7) # White
+
+
+Perm_Check()
+{
+        [[ -v DEBUG ]] && echo -e "${txtgrn}Checking required permissions.${txtwt}"
+        if [ ! -f $SSH_KEY ]; then
+                echo -e "${txtred}Please fix the SSH Key, it appears to be missing.${txtwht}"
+                exit 10
+        elif [ ! -f $SCRIPT_DATA_DIR/.password ]; then
+                echo -e "{txtred}Please fix the .password file, it appears to be missing.${txtwht}"
+                exit 11
+        fi
+
+        API_ACC_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $API_ACC_FILE)
+        API_SEC_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $API_SEC_FILE)
+        PASSWORD_PERM=$(ls -alh $SCRIPT_DATA_DIR | grep $PASSWORD_FILE)
+        SSH_DIR_PERM=$(ls -alh /home/$USERNAME/ | grep ' .ssh')
+        SSH_KEY_PERM=$(ls -alh $SSH_KEY)
+
+
+        if   ! echo $SSH_DIR_PERM | awk '{print $1}' | grep -q 'drwx------'; then
+                echo -e "${txtred}Please fix the permissions on the /home/$USERNAME/.ssh folder; the permissions should be '0700'.${txtwht}"
+                exit 20
+        elif ! echo $SSH_DIR_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo -e "${txtred}Please fix the ownership on the /home/$USERNAME/.ssh folder; it should be owned by '$USERNAME'.${txtwht}"
+                exit 21
+        elif ! echo $SSH_KEY_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo -e "${txtred}Please fix the permissions on the /home/$USERNAME/.ssh/id_ecdsa_tenable_mgmt file; the permissions should be '0600'.${txtwht}"
+                exit 30
+        elif ! echo $SSH_KEY_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo -e "${txtred}Please fix the ownership on the /home/$USERNAME/.ssh/id_ecdsa_tenable_mgmt file; the file should be owned by '$USERNAME'.${txtwht}"
+                exit 31
+        elif ! echo $PASSWORD_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo -e "${txtred}Please fix the permissions on the ssh password file; the permissions should be '0600'.${txtwht}"
+                exit 40
+        elif ! echo $PASSWORD_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo -e "${txtred}Please fix ownership of the .password file; the file should be owned by '$USERNAME'.${txtwht}"
+                exit 41
+        elif ! echo $API_ACC_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo -e "${txtred}Please fix the permission on the API access file; the permissions should be '0600'.${txtwht}"
+                exit 50
+        elif ! echo $API_ACC_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo -e "${txtred}Please fix ownership of the API access file; the file should be owned by '$USERNAME'.${txtwht}"
+                exit 51
+        elif ! echo $API_SEC_PERM | awk '{print $1}' | grep -q '\-rw-------'; then
+                echo -e "${txtred}Please fix the permission on the API secret file; the permissions should be '0600'.${txtwht}"
+                exit 50
+        elif ! echo $API_SEC_PERM | awk '{print $3}' | grep -q "$USERNAME"; then
+                echo -e "${txtred}Please fix ownership of the API secret file; the file should be owned by '$USERNAME'.${txtwht}"
+                exit 51
+        fi
+}
+
+Load_Creds()
+{
+        [[ -v DEBUG ]] && echo -e "${txtgrn}Loading credentials${txtwht}."
+        SUDOPASS=$(sudo cat $SCRIPT_DATA_DIR/$PASSWORD_FILE)
+        API_ACC_KEY=$(sudo cat $SCRIPT_DATA_DIR/$API_ACC_FILE)
+        API_SEC_KEY=$(sudo cat $SCRIPT_DATA_DIR/$API_SEC_FILE)
+}
+
+Check_Nodes()
+{
+        [[ -v DEBUG ]] && echo -e "${txtgrn}Retreiving list of nodes.${txtwht}"
+        NODES=$(curl -k -H "x-apikey: accesskey=$API_ACC_KEY;secretkey=$API_SEC_KEY" -X GET "https://$TSC_HOST/rest/scanner" 2>/dev/null | jq | grep -E '^[ ]{6}"id"\: "[0-9]{1,4}"\,$' | cut -d '"' -f 4 | sort -d)
+
+        echo -e "${txtgrn}Checking the status of each node.${txtwht}"
+        for n in $NODES; do
+                CURDATE=$(curl -k -H "x-apikey: accesskey=$API_ACC_KEY;secretkey=$API_SEC_KEY" -X GET "https://$TSC_HOST/rest/scanner/$n" 2>/dev/null | jq | tee $TMP_FILE 2>/dev/null | grep loadedPluginSet | cut -d '"' -f 4)
+                TESTDATE=$(date +%Y%m%d)
+                if [[ ! "$CURDATE" =~ "$TESTDATE" ]]; then
+                        echo -n -e "${txtred}*${txtwht}"
+                        [[ -v DEBUG ]] && echo -e "\n${txtred}Node:  " $n "  Loaded Plugin Date:  " $CURDATE "  Todays Date:  " $TESTDATE "${txtwht}\n"
+                        FIP=$(grep -i '"ip":' $TMP_FILE | cut -d '"' -f 4)
+                        if [ -v FAILNODES ]; then
+                                export FAILNODES="$FAILNODES,$FIP"
+                        else
+                                export FAILNODES="$FIP"
+                        fi
+                else
+                        echo -n -e "${txtwht}*"
+                fi
+        done
+        rm $TMP_FILE
+}
+
+Download_Update()
+{
+        curl -k "$PATCH_URL" -o $WEB_DIR/$PATCH_FILE
+}
+
+Set_OS_Vars()
+{
+        [[ -v DEBUG ]] && echo -e "${txtgrn}Interrogating remote host for versioning information.${txtwht}"
+        REMOTE_ID=$(ssh $SSH_OPTS $SSH_USER@$n "grep 'ID_LIKE' /etc/*release | cut -d '=' -f 2")
+        case $REMOTE_ID in
+                debian)
+                        ADMIN_GROUP=adm
+                        ;;
+                rhel)
+                        ADMIN_GROUP=wheel
+                        ;;
+                \?) # Handle all others
+                        ADMIN_GROUP=wheel
+                        echo -e "\n\n${txtred}UNABLE TO DETERMINE HOST TYPE:  ${txtwht}$REMOTE_ID, using 'wheel'."
+                        ;;
+        esac
+}
+
+Check_Remote_Files()
+{
+        [[ -v DEBUG ]] && echo -e "${txtwht}Checking for the script directory on remote host, creating if needed."
+        ssh $SSH_OPTS $SSH_USER@$n "echo '$SUDOPASS' | sudo -S [[ ! -d $SCRIPT_DIR ]] && 'mkdir -m 0770 -p $SCRIPT_DIR && touch $SCRIPT_DIR/$SCRIPT_FILE && touch $SCRIPT_DIR/$PATCH_FILE && chown -R root:$ADMIN_GROUP $SCRIPT_DIR && chmod 0660 $SCRIPT_DIR/$PATCH_FILE && chmod 0770 $SCRIPT_DIR/$SCRIPT_FILE'"
+        REMOTE_UPDATE_SCRIPT_MD5=$(ssh $SSH_OPTS $SSH_USER@$n "echo '$SUDOPASS' | sudo -S [[ -d $SCRIPT_DIR ]] && md5sum $SCRIPT_DIR/$SCRIPT_FILE 2>/dev/null | awk '{print $1}'")
+        REMOTE_UPDATE_FILE_MD5= $(ssh $SSH_OPTS $SSH_USER@$n "echo '$SUDOPASS' | sudo -S [[ -d $SCRIPT_DIR ]] && md5sum $SCRIPT_DIR/$PATCH_FILE 2>/dev/null | awk '{print $1}'")
+
+        if [[ ! "$REMOTE_UPDATE_SCRIPT_MD5" == "$LOCAL_UPDATE_SCRIPT_MD5" ]]; then
+                [[ -v DEBUG ]] && echo 'Relaxing permissions on remote script'
+                ssh $SSH_OPTS $SSH_USER@$n "echo '$SUDOPASS' | sudo -S chown $USERNAME:$ADMIN_GROUP $SCRIPT_DIR/$SCRIPT_FILE 2>/dev/null"
+                [[ -v DEBUG ]] && echo 'Copying script to remote host'
+                scp $SCP_OPTS $SCRIPT_DIR/$SCRIPT_FILE $SSH_USER@$n:$SCRIPT_DIR/$SCRIPT_FILE
+                [[ -v DEBUG ]] && echo 'Setting owner of remote script to root'
+                ssh $SSH_OPTS $SSH_USER@$n "echo '$SUDOPASS' | sudo -S chown root:$ADMIN_GROUP $SCRIPT_DIR/$SCRIPT_FILE && echo -e '\r\n${txtgrn}Ownership changed.${txtwht}' || echo -e '\r\n${txtred}Failed to change ownership${txtwht}'"
+        fi
+
+        if [[ ! "$REMOTE_UPDATE_FILE_MD5" == "$LOCAL_UPDATE_FILE_MD5" ]]; then
+                [[ -v DEBUG ]] && echo "Checking if host can download directly from the internet"
+                if [[ $(ssh $SSH_OPTS $SSH_USER@$n "curl -L -s -w 10 'https://downloads.nessus.org/'") ]]; then
+                        [[ -v DEBUG ]] && echo "Download from the internet is viable, continuing download from Tenable."
+                        REMOTE_UPDATE_FILE_MD5=$(ssh $SSH_OPTS $SSH_USER@$n "curl -k -s -w 10 '$PATCH_URL' -o $SCRIPT_DIR/$PATCH_FILE && md5sum $SCRIPT_DIR/$PATCH_FILE | awk '{print $1}'")
+                fi
+
+                [[ -v DEBUG ]] && echo "Checking if host can download from https://$TSC_HOST"
+                if [[ ! "$REMOTE_UPDATE_FILE_MD5" == "$LOCAL_UPDATE_FILE_MD5" ]] && [[ $(ssh $SSH_OPTS $SSH_USER@$n "curl -L -s -w 10 'https://$TSC_HOST/'") ]]; then
+                        [[ -v DEBUG ]] && echo "Attempting to download from $TSC_PATCH_URL."
+                        REMOTE_UPDATE_FILE_MD5=$(ssh $SSH_OPTS $SSH_USER@$n "curl -k -s -w 10 '$TSC_PATCH_URL' -o $SCRIPT_DIR/$PATCH_FILE && md5sum $SCRIPT_DIR/$PATCH_FILE | awk '{print $1}'")
+                fi
+
+                if [[ ! "$REMOTE_UPDATE_FILE_MD5" == "$LOCAL_UPDATE_FILE_MD5" ]]; then
+                        [[ -v DEBUG ]] && echo "Failed to download from both URLs, attempting to push via SCP"
+                        scp $SCP_OPTS $SCRIPT_DIR/$PATCH_FILE $SSH_USER@$n:$SCRIPT_DIR/$PATCH_FILE
+                        REMOTE_UPDATE_FILE_MD5=$(ssh $SSH_OPTS $SSH_USER@$n "md5sum $SCRIPT_DIR/$PATCH_FILE | awk '{print $1}'")
+                fi
+        fi
+}
+
+Remediate_Nodes()
+{
+        [[ -v DEBUG ]] && echo -e "${txtgrn}Hashing local files.{$txtwht}"
+        LOCAL_UPDATE_SCRIPT_MD5=$(md5sum $SCRIPT_DIR/$SCRIPT_FILE | awk '{print $1}')
+        LOCAL_UPDATE_FILE_MD5=$(md5sum $SCRIPT_DIR/$PATCH_FILE | awk '{print $1}')
+
+        echo -e '\n\n\n${txtgrn}The following nodes will be updated:  '
+        echo -e "${txtred}$( echo $FAILNODES | tr ',' "\n" )${txtwht}"
+        for n in $(echo $FAILNODES | tr ',' "\n"); do
+                unset PINGED
+                PINGED=$(ping -c 2 $n)
+                [[ -v DEBUG ]] && echo "Checking if node at $n is reachable..."
+                if [ -v PINGED ]; then
+                        [[ -v DEBUG ]] && echo -e "${txtgrn}Node Reachable, proceeding with remediation.${txtwht}"
+                        [[ -v DEBUG ]] && echo -e "{$txtgrn}Checking host type.${txtwht}"
+                        Set_OS_Vars
+                        [[ -v DEBUG ]] && echo 'Copying key to remote host'
+                        ssh $SSH_OPTS $SSH_USER@$n "echo $SCRIPT_MD5 > /tmp/.master && echo -e '\r\nKey placed on remote system' || echo -e '\r\nFailed to place key on remote host'"
+                        Check_Remote_Files
+                        if [[ "$REMOTE_UPDATE_FILE_MD5" == "$LOCAL_UPDATE_FILE_MD5" ]]; then
+                                [[ -v DEBUG ]] && echo "Calling remote update script"
+                                ssh $SSH_OPTS $SSH_USER@$n "echo '$SUDOPASS' | sudo -S $SCRIPT_DIR/$SCRIPT_FILE -u $SSH_USER -f $SCRIPT_DIR/$PATCH_FILE && echo -e '\r\n${txtgrn}Successfully updated.${txtwht}' || echo -e '\r\n${txtred}Failed update${txtwht}'"
+                        else
+                                echo -e "${txtred}Error: remote update file does not match the local update file.  Skipping node for now.${txtwht}"
+                                continue
+                        fi
+                else
+                        echo -e "${txtred}Node $n is unreachable, moving to next host.${txtwht}"
+                fi
+        done
+        rm -f $TMP_FILE
+}
+
+
+Perm_Check
+Load_Creds
+Check_Nodes
+if [[ -v FAILNODES ]]; then
+        Download_Update
+        Remediate_Nodes
+else
+        echo -e "\n\n${txtgrn}No nodes are out of tolerance, exiting.${txtwht}"
+fi

@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Written by Joshua Johnson - 26 July 2023
+# 6 Sep 2023 - updated script to accept command line arguments to set the username to accomodate multiple users / su calling.
+# Version 1.4
+
+if [ "$EUID" -ne 0 ]; then
+        echo 'Please run as root'
+        exit 10
+fi
+
+USERNAME="$USER"
+
+SCRIPT_DATA_DIR="/home/$USERNAME/.Script_Data/"
+
+while getopts ":f:u:" option; do
+        case $option in
+                f)
+                        PATCH_LOCATION=$OPTARG;; # The fully path / filename to the pre-uploaded patch to apply
+                u)
+                        USERNAME=$OPTARG;; # The user that has the home directory with the Scripts folder in it
+        esac
+done
+
+SVC=$(which systemctl 2>/dev/null)
+ADMIN_HOME_DIR="/home/$USERNAME/Scripts"
+
+TENABLE_USER=$(cat $SCRIPT_DATA_DIR/.tenable_user)
+TENABLE_PASS=$(cat $SCRIPT_DATA_DIR/.tenable_pass)
+PATCH_URL="https://downloads.nessus.org/get.php?f=all-2.0.tar.gz&u=$TENABLE_USER&p=$TENABLE_PASS"
+
+if [[ -v 1 ]] && [[ "$1" =~ "/" ]]; then
+        SCRIPT_BASE_DIR=$1
+else
+        SCRIPT_BASE_DIR=/tmp
+fi
+
+CORRECT_HASH=$(cat $SCRIPT_BASE_DIR/.master 2>/dev/null)
+MY_HASH=$(md5sum $ADMIN_HOME_DIR/${0##*/} | cut -d ' ' -f 1)
+
+if [[ $CORRECT_HASH == $MY_HASH ]]; then
+        PATCH_FILE=all-2.0.tar.gz
+        CURRENT_PATCH_HASH=$(cat $ADMIN_HOME_DIR/.$PATCH_FILE.md5 2>/dev/null)
+        if [[ -v PATCH_LOCATION ]]; then
+                mv -f $PATCH_LOCATION $SCRIPT_BASE_DIR/$PATCH_FILE
+                NEW_PATCH_HASH=$(md5sum $SCRIPT_BASE_DIR/$PATCH_FILE | cut -d ' ' -f 1 )
+        else
+                NEW_PATCH_HASH=$(curl "$PATCH_URL" -o $SCRIPT_BASE_DIR/$PATCH_FILE && md5sum $SCRIPT_BASE_DIR/$PATCH_FILE | cut -d ' ' -f 1 )
+        fi
+
+        if [[ "$CURRENT_PATCH_HASH" != "$NEW_PATCH_HASH" ]]; then
+                /opt/nessus/sbin/nessuscli update $SCRIPT_BASE_DIR/$PATCH_FILE
+                if [ -v SVC ] && [[ "$SVC" =~ "bin/" ]]; then
+                        systemctl restart nessusd
+                else
+                        service nessusd restart
+                fi
+                echo $NEW_HASH > $ADMIN_HOME_DIR/.$PATCH_FILE.md5
+                chown root:root $ADMIN_HOME_DIR/.$PATCH_FILE.md5
+                chmod 644 $ADMIN_HOME_DIR/.$PATCH_FILE.md5
+        else
+                echo No update necessary, skipping patch
+        fi
+else
+        echo Script integrity check failed, exiting.
+        export ERROR=100
+fi
+
+rm -f $SCRIPT_BASE_DIR/$PATCH_FILE 2>/dev/null
+rm -f $SCRIPT_BASE_DIR/.master 2>/dev/null
+[[ -v ERROR ]] && exit $ERROR

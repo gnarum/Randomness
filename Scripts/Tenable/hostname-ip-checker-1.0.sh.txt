@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "Hostname is:  $(/bin/hostname)  // IP Address is:  $(/sbin/ip add | /bin/grep ' inet ' | /bin/awk '{print $2}' | /bin/grep -v '127.0.0.') // IPv6 Address is:  $(/sbin/ip add | /bin/grep 'inet6' | /bin/grep -E -v ' ::1|fe80:' | /bin/awk '{print $2}')"

@@ -1,0 +1,230 @@
+#!/bin/bash
+
+# Written by Joshua Johnson - 17 August 2023
+# Version 1.0
+#
+# This scripts purpose is to query the Tenable Manager for the list of Agent Groups
+# then use this list to populate the new Nessus Manager with the applicable groups.
+# Once the groups are created, iterate through the assigned HOST_GROUP to dump the
+# list of hosts and migrate them from OLD_MGR to NEW_MGR.  Theres a bit of error
+# checking to ensure things don't go completely off the rails.
+
+###  OVERALL LOGIC FLOW ###
+## LOOP through each Host Group
+## 1.  Get list of hosts from Old Manager, filter by not unlinked
+## 2.  Check if group exists on New Manager
+## 2a. Create group if necessary
+## 3.  Collect the Group ID from the New Manager
+## 4.  Unlink Host from Old Manager
+## 5.  Link Host to New Manager
+## 6.  Get ID from New Manager by querying the API for the IP address of the host
+## 7.  Assign host id to agent-group id
+## 8.  Query agent-group for host-id to verify join was successful
+
+# 'Linux_Servers' '$Linux_Servers' 'Linux Appliances'\)
+AGENT_BUILD="152"
+AGENT_VERSION="10.4.0"
+DTS=$(date +%Y%m%d%H%M%S)
+SCRIPT_DIR=/home/admin/Scripts
+SSH_USER=admin
+SSH_KEY=/home/admin/.ssh/id_ecdsa_tenable_mgmt
+SSH_OPTS="-q -o BatchMode=yes -o StrictHostKeyChecking=yes -i $SSH_KEY"
+SUDO_PASS_FILE=$SCRIPT_DIR/.password
+
+## Variables for file management
+AGENT_GROUP_FILE=agent-groups.txt
+AGENT_RPM=FILENAME.txt
+ALL_AGENT_LIST=all-agents.txt
+COMPLETED_FILE="completed_migrations.$DTS.txt"
+FAILED_FILE="failed_migrations.$DTS.txt"
+HOST_ENUM=host.txt
+HOST_GROUPS_FILE=host_groups.txt
+HOST_LIST=list.txt
+LINK_BIN="/opt/nessus_agent/sbin/nessuscli"
+REPO=/home/admin/Distro
+SCRIPT_DIR=/home/admin/Scripts
+SUDO_PASS=$(sudo cat $SUDO_PASS_FILE)
+TMP=/var/tmp
+
+## Variables for the Old Manager
+OLD_MGR=apvmevs02.usaid.gov
+OLD_PORT=8443
+OLD_API_ACCESS=$(sudo cat $SCRIPT_DIR/.api-access.mgr-old)
+OLD_API_SECRET=$(sudo cat $SCRIPT_DIR/.api-secret.mgr-old)
+
+## Variables for the New Manager
+NEW_MGR=apvmevs03.usaid.gov
+NEW_PORT=8834
+NEW_API_ACCESS=$(sudo cat $SCRIPT_DIR/.api-access.mgr-new)
+NEW_API_SECRET=$(sudo cat $SCRIPT_DIR/.api-secret.mgr-new)
+NEW_LINK_KEY=$(sudo cat $SCRIPT_DIR/.link-key.mgr-new)
+
+## API Query Variables
+AGENT_GROUPS_QUERY="agent-groups"
+#AGENTS_IN_GROUP_QUERY="agents?sort_by=last_scanned&sort_order=desc&filter.search_type=and&filter.0.filter=groups&filter.0.quality=eq&filter.0.value="
+AGENT_BY_IP_QUERY="agents?sort_by=last_scanned&sort_order=desc&filter.search_type=and&filter.0.filter=ip&filter.0.quality=eq&filter.0.value="
+
+HOST_GROUPS=$(cat $SCRIPT_DIR/$HOST_GROUPS_FILE)
+echo -e "List of Host Groups:\n$HOST_GROUPS"
+
+## LOOP through each Host Group
+for GROUP in $(echo $HOST_GROUPS); do
+        if [[ "$GROUP" == "" ]]; then
+                echo "Error:  Group is blank in loop, continuing."
+                continue
+        else
+                echo -e "\nStarting loop for $GROUP"
+        fi
+
+        # Ensure our working files are empty so we don't pick up on old work
+        sudo rm -f $TMP/$AGENT_GROUP_FILE.old 2>/dev/null
+        sudo rm -f $TMP/$AGENT_GROUP_FILE.new 2>/dev/null
+        sudo rm -f $TMP/$AGENT_GROUP_FILE.names.old 2>/dev/null
+        sudo rm -f $TMP/$AGENT_GROUP_FILE.names.new 2>/dev/null
+        sudo rm -f $TMP/$ALL_AGENT_LIST 2>/dev/null
+        sudo rm -f $TMP/$HOST_LIST 2>/dev/null
+        sudo rm -f $TMP/$HOST_ENUM 2>/dev/null
+        sudo rm -f $TMP/$HOST_LIST 2>/dev/null
+
+        echo "Pulling agent-group lists from both managers"
+
+        # Pull group / host lists from managers
+        curl -s -k -H "X-ApiKeys: accessKey=$OLD_API_ACCESS; secretKey=$OLD_API_SECRET" -H "accept: application/json" -X GET "https://$OLD_MGR:$OLD_PORT/agent-groups" -o $TMP/$AGENT_GROUP_FILE.old
+        curl -s -k -H "X-ApiKeys: accessKey=$NEW_API_ACCESS; secretKey=$NEW_API_SECRET" -H "accept: application/json" -X GET "https://$NEW_MGR:$NEW_PORT/agent-groups" -o $TMP/$AGENT_GROUP_FILE.new
+        cat $TMP/$AGENT_GROUP_FILE.old | jq ".groups[].name" | sort > $TMP/$AGENT_GROUP_FILE.names.old
+        cat $TMP/$AGENT_GROUP_FILE.new | jq ".groups[].name" | sort > $TMP/$AGENT_GROUP_FILE.names.new
+        MISSING_GROUPS=$(diff $TMP/$AGENT_GROUP_FILE.names.old $TMP/$AGENT_GROUP_FILE.names.new | grep '<' | cut -f 2- -d ' ' | cut -d '"' -f 2 | tr '\n' ',' | sed 's|,$||g')
+        if [[ ! "$MISSING_GROUPS" == "" ]]; then
+                IFS_BKUP=$IFS
+                IFS=','
+                echo "Missing Groups List:  $MISSING_GROUPS"
+                for GROUP in $MISSING_GROUPS; do
+                        echo -e "\nAdding $GROUP to $NEW_MGR"
+                        curl -s -k -H "X-ApiKeys: accessKey=$NEW_API_ACCESS; secretKey=$NEW_API_SECRET" -H "accept: application/json" -H "Content-Type: application/json" --data "{\"name\":\"$GROUP\"}" -X POST "https://$NEW_MGR:$NEW_PORT/agent-groups"
+                done
+                IFS=$IFS_BKUP
+        fi
+
+        ## 0. Translate $group into $group_id
+        OLD_GID=$(cat $TMP/$AGENT_GROUP_FILE.old | jq ".groups[] | select(.name | test(\"$GROUP\")) | .id")
+        echo -e "\nGroup: " $GROUP "\nGroup ID: " $OLD_GID
+        if [[ "$OLD_GID" == "" ]]; then
+                echo "Error: $GROUP not found on $OLD_MGR, skipping group"
+                continue
+        fi
+
+        ## 1.  Get list of hosts from Old Manager, dump raw to file for re-use during this iteration
+        echo "Pulling lists of hosts from $OLD_MGR"
+        curl -s -k -H "X-ApiKeys: accessKey=$OLD_API_ACCESS; secretKey=$OLD_API_SECRET" -H "accept: application/json" -X GET "https://$OLD_MGR:$OLD_PORT/agents" -o $TMP/$ALL_AGENT_LIST
+        curl -s -k -H "X-ApiKeys: accessKey=$OLD_API_ACCESS; secretKey=$OLD_API_SECRET" -H "accept: application/json" -X GET "https://$OLD_MGR:$OLD_PORT/$AGENT_GROUPS_QUERY/$OLD_GID" -o $TMP/$HOST_LIST
+
+        ## 2.  Check if group exists on New Manager
+        echo "Checking if $GROUP exists on $NEW_MGR"
+        NEW_GID=$(curl -s -k -H "X-ApiKeys: accessKey=$NEW_API_ACCESS; secretKey=$NEW_API_SECRET" -H "accept: application/json" -X GET "https://$NEW_MGR:$NEW_PORT/$AGENT_GROUPS_QUERY" | jq ".groups[] | select(.name | test(\"$GROUP\")) | .id")
+        ## 2a. Create group if necessary
+        if [[ "$NEW_GID" == "" ]]; then
+                ## 3.  Collect the Group ID from the New Manager
+                NEW_GID=$(curl -s -k -H "X-ApiKeys: accessKey=$NEW_API_ACCESS; secretKey=$NEW_API_SECRET" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"name\":\"$GROUP\"}" -X POST "https://$NEW_MGR:$NEW_PORT/$AGENT_GROUPS_QUERY" | jq '.id')
+                ## Verify we got the NEW_GID, kill process otherwise
+                if [[ "$NEW_GID" == "" ]]; then
+                        echo "Fatal Error:  unable to create group $GROUP on $NEW_MGR"
+                        exit 10
+                fi
+        fi
+
+        # Loop through each host in the offline HOST_LIST file and select all 'online' hosts
+        echo "Looping through hosts in '$GROUP'"
+        for HOST in $(cat $TMP/$HOST_LIST | jq -r ".agents[] | select(.status | test(\"online\")) | .ip"); do
+                # Clear out variables
+                unset VERSION
+                unset BUILD
+                unset AGENT_GROUPS
+                unset ADDED_GROUPS
+                unset PINGED
+
+                # Check connectivity
+                echo "Checking connectivity to host $HOST"
+                if [[ "$HOST" == "" ]]; then
+                        echo "Warning: blank host IP encountered during migration"
+                        continue
+                fi
+                PINGED=$(ping -c2 -w1 $HOST | grep 'bytes from')
+                if [[ "$PINGED" == "" ]]; then
+                        echo "Host $HOST is unpingable, checking SSH before skipping"
+                        T2=$(ssh $SSH_OPTS $SSH_USER@$HOST whoami)
+                        if [[ "$T2" == "" ]]; then
+                                echo "Warning: unable to establish connection to $HOST during migration, skipping host"
+                                continue
+                        fi
+                fi
+
+                # Check agent version and build
+                echo "Getting agent versions on host $HOST"
+                VERSION=$(cat $TMP/$HOST_LIST | jq -r ".agents[] | select(.ip | test(\"$HOST\")) | .core_version" )
+                BUILD=$(cat $TMP/$HOST_LIST | jq -r ".agents[] | select(.ip | test(\"$HOST\")) | .core_build" )
+
+                # if version is not current, upgrade it
+                echo "Checking agent version against current version in var"
+                #if [[ ! "$AGENT_VERSION" =~ "$VERSION" || ! "$AGENT_BUILD" =~ "$BUILD" ]]; then
+                #       echo "Upgrading agent on $HOST"
+                #       scp $REPO/$AGENT_RPM $SSH_USER@$h:
+                #       ssh $SSH_OPTS $SSH_USER@$HOST "echo $SUDO_PASS | sudo -S rpm -Uvh ~/$AGENT_FILE;rm -f $AGENT_FILE"
+                #fi
+
+                # Ensure the agent service is running before we try to manipulate it
+                echo "Ensuring agent service is running on $HOST"
+                ssh $SSH_OPTS $SSH_USER@$HOST "echo '$SUDO_PASS' | sudo -S systemctl start nessusagent || sudo service nessusagent start"
+
+                # Check group memberships of the host
+                AGENT_GROUPS=$(cat $TMP/$ALL_AGENT_LIST | jq -r ".agents[] | select(.ip | test(\"$HOST\$\")) | .groups" | tr -d '[]\n\r' | sed "s/  //g")
+                echo -e "$HOST is a member of the following groups:\n$AGENT_GROUPS"
+
+                # Unlink from Old Manager
+                echo "Unlinking $HOST from $OLD_MGR"
+                ssh $SSH_OPTS $SSH_USER@$HOST "echo $SUDO_PASS | sudo -S $LINK_BIN agent unlink"
+                echo "Restarting agent service"
+                ssh $SSH_OPTS $SSH_USER@$HOST "echo $SUDO_PASS | sudo -S systemctl restart nessusagent || sudo service nessusagent restart"
+
+                # Link to new manager
+                echo "Linking $HOST to $NEW_MGR with these groups:  $AGENT_GROUPS"
+                ssh $SSH_OPTS $SSH_USER@$HOST "echo $SUDO_PASS | sudo -S $LINK_BIN agent link --key=$NEW_LINK_KEY --groups=$AGENT_GROUPS --host=$NEW_MGR --port=$NEW_PORT"
+
+                # New Manager:  Verify Agent is in the appropriate Groups
+                echo "Pull groups for $HOST from $NEW_MGR to verify configuration"
+                ADDED_GROUPS=$(curl -s -k -H "X-ApiKeys: accessKey=$NEW_API_ACCESS; secretKey=$NEW_API_SECRET" -H "accept: application/json" -X GET "https://$NEW_MGR:$NEW_PORT/$AGENT_BY_IP_QUERY$HOST" | jq -r ".agents[].groups" | tr -d '[]\n\r' | sed 's/  //g')
+
+                if [[ ! "$AGENT_GROUPS" == "$ADDED_GROUPS" ]]; then
+                        HOST_ID=$(cat $TMP/$HOST_LIST | jq -r ".agents[] | select(.ip | test(\"$HOST\")) | .id")
+                        echo "Warning:  Agent $HOST_ID is not added to all of these Groups: \"$AGENT_GROUPS\""
+                        if [[ -v FAILED_MIGRATIONS && ! "$FAILED_MIGRATIONS" == "" ]]; then
+                                FAILED_MIGRATIONS=$FAILED_MIGRATIONS,$HOST
+                        else
+                                FAILED_MIGRATIONS=$HOST
+                        fi
+                else
+                        echo "$HOST successfully added to specified groups"
+                        if [[ -v COMPLETED_MIGRATIONS && ! "$COMPLETED_MIGRATIONS" == "" ]]; then
+                                COMPLETED_MIGRATIONS=$COMPLETED_MIGRATIONS,$HOST
+                        else
+                                COMPLTED_MIGRATIONS=$HOST
+                        fi
+                fi
+        done # Loop through Hosts in Group
+done    # Loop through Host Groups
+if [[ -v FAILED_MIGRATIONS ]]; then
+        echo "Saving list of failed Migrations to $SCRIPT_DIR/$FAILED_FILE"
+        echo "$FAILED_MIGRATIONS" > $SCRIPT_DIR/$FAILED_FILE
+fi
+if [[ -v COMPLETED_MIGRATIONS ]]; then
+        echo "Saving list of Completed Migrations to $SCRIPT_DIR/$COMPLETED_FILE"
+        echo "$COMPLETED_MIGRATIONS" > $SCRIPT_DIR/$COMPLETED_FILE
+fi
+sudo rm -f $TMP/$AGENT_GROUP_FILE.old 2>/dev/null
+sudo rm -f $TMP/$AGENT_GROUP_FILE.new 2>/dev/null
+sudo rm -f $TMP/$AGENT_GROUP_FILE.names.old 2>/dev/null
+sudo rm -f $TMP/$AGENT_GROUP_FILE.names.new 2>/dev/null
+sudo rm -f $TMP/$ALL_AGENT_LIST 2>/dev/null
+sudo rm -f $TMP/$HOST_LIST 2>/dev/null
+sudo rm -f $TMP/$HOST_ENUM 2>/dev/null
+sudo rm -f $TMP/$HOST_LIST 2>/dev/null
+echo "Script complete."
